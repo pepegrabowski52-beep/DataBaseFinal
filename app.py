@@ -1,9 +1,10 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, session, redirect, url_for, jsonify
+from flask import Flask, render_template, request, session, redirect, url_for
 
 app = Flask(__name__)
-app.secret_key = "super-geheimes-gruppen-projekt-2026"
+# WICHTIG: Das sichert dein Admin-Login im Browser-Tab
+app.secret_key = "finales-gruppen-projekt-sicher-2026"
 
 DB_PATH = 'datenbank.db'
 
@@ -15,15 +16,10 @@ ERLAUBTE_ADMINS = {
     "App": "AppLogin"
 }
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=20)
-    conn.row_factory = sqlite3.Row
-    conn.execute('PRAGMA journal_mode=WAL;')
-    return conn
-
 def init_db():
-    conn = get_db_connection()
-    conn.execute('''
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS benutzer (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -32,14 +28,6 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
-
-# Erlaubt den Live-Datenabruf über verschiedene Browser hinweg ohne Blockade
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
-    return response
 
 # 1. Startseite: Lädt dein Register-Formular
 @app.route('/')
@@ -52,14 +40,13 @@ def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    try:
-        conn = get_db_connection()
-        conn.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"Fehler beim Speichern: {e}")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+    conn.commit()
+    conn.close()
     
+    # Zeigt die Erfolgsseite und bietet Links an
     return """
     <!DOCTYPE html>
     <html>
@@ -67,7 +54,7 @@ def anmelden():
     <body>
         <div class="box">
             <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
-            <p>Die Daten wurden dauerhaft und live in die SQLite-Datenbank übertragen.</p>
+            <p>Der Benutzer wurde in die SQLite-Datenbank eingetragen.</p>
             <br>
             <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
         </div>
@@ -75,27 +62,13 @@ def anmelden():
     </html>
     """
 
-# Geheimer Hintergrund-Kanal für die JavaScript-Live-Daten
-@app.route('/api/live-daten')
-def live_daten():
-    if not session.get('eingeloggt'):
-        return jsonify([])
-    
-    conn = get_db_connection()
-    cursor = conn.execute("SELECT * FROM benutzer")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    user_list = [ [row['id'], row['name'], row['passwort']] for row in rows ]
-    return jsonify(user_list)
-
-# Route zum Abmelden
+# Route zum manuellen Abmelden
 @app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite mit geschütztem Login und JavaScript-Live-Refresh
+# 3. Die /benutzer-Seite: Klassischer, bombensicherer Auto-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -110,6 +83,7 @@ def benutzer():
             <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
             '''
 
+    # Wenn nicht eingeloggt, zeige die Login-Maske
     if not session.get('eingeloggt'):
         return """
         <!DOCTYPE html>
@@ -138,12 +112,19 @@ def benutzer():
         </html>
         """
 
-    return """
+    # Wenn eingeloggt, hole die Daten direkt aus der SQLite-Datei
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM benutzer")
+    user_list = cursor.fetchall()
+    conn.close()
+    
+    html_tabelle = """
     <!DOCTYPE html>
     <html>
     <head>
         <title>Datenbank Übersicht</title>
-        <style>
+        <meta http-equiv="refresh" content="3"> <style>
             body { font-family: Arial, sans-serif; padding: 30px; background-color: #f4f4f9; }
             table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
             th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
@@ -153,46 +134,25 @@ def benutzer():
             .btn { color: #007bff; text-decoration: none; font-weight: bold; margin-right: 20px; }
             .logout { color: #dc3545; }
         </style>
-        <script>
-            async function ladeDatenLive() {
-                try {
-                    // cache: "no-store" zwingt Chrome dazu, die echten Live-Daten zu holen, statt alte Daten anzuzeigen
-                    let response = await fetch('/api/live-daten', { cache: "no-store" });
-                    let userList = await response.json();
-                    let tabelleBody = document.getElementById('user-table-body');
-                    
-                    if (!userList || userList.length === 0) {
-                        tabelleBody.innerHTML = "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>";
-                        return;
-                    }
-                    
-                    let html = "";
-                    userList.forEach(user => {
-                        html += `<tr><td>${user[0]}</td><td>${user[1]}</td><td>${user[2]}</td></tr>`;
-                    });
-                    tabelleBody.innerHTML = html;
-                } catch (e) {
-                    console.log("Fehler beim Live-Laden", e);
-                }
-            }
-            
-            setInterval(ladeDatenLive, 2000);
-            window.onload = ladeDatenLive;
-        </script>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank (Live-Ansicht):</h2>
-        <p class="info-text">🔒 Angemeldet als Admin. Neue User ploppen hier alle 2 Sekunden völlig automatisch live auf!</p>
+        <h2>Übersicht der SQLite-Datenbank (Auto-Refresh):</h2>
+        <p class="info-text">🔄 Angemeldet. Diese Seite lädt sich alle 3 Sekunden neu, um neue User anzuzeigen.</p>
         <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Benutzername</th>
-                    <th>Passwort</th>
-                </tr>
-            </thead>
-            <tbody id="user-table-body">
-                </tbody>
+            <tr>
+                <th>ID</th>
+                <th>Benutzername</th>
+                <th>Passwort</th>
+            </tr>
+    """
+    
+    for user in user_list:
+        html_tabelle += f"<tr><td>{user[0]}</td><td>{user[1]}</td><td>{user[2]}</td></tr>"
+        
+    if not user_list:
+        html_tabelle += "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>"
+        
+    html_tabelle += """
         </table>
         <br>
         <a class="btn" href="/">← Zurück zum Register</a>
@@ -200,6 +160,7 @@ def benutzer():
     </body>
     </html>
     """
+    return html_tabelle
 
 if __name__ == '__main__':
     init_db()
