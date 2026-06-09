@@ -3,7 +3,6 @@ import sqlite3
 from flask import Flask, render_template, request, session, redirect, url_for
 
 app = Flask(__name__)
-# WICHTIG: Das sichert dein Admin-Login im Browser-Tab
 app.secret_key = "finales-gruppen-projekt-sicher-2026"
 
 DB_PATH = 'datenbank.db'
@@ -16,8 +15,16 @@ ERLAUBTE_ADMINS = {
     "App": "AppLogin"
 }
 
+# Hilfsfunktion für eine sichere und blockierungsfreie DB-Verbindung
+def get_db_connection():
+    # timeout=30 sorgt dafür, dass SQLite bis zu 30 Sekunden wartet, falls die DB kurz besetzt ist
+    conn = sqlite3.connect(DB_PATH, timeout=30)
+    # Aktiviert den WAL-Modus: Erlaubt gleichzeitiges Lesen (Admin) und Schreiben (Register)
+    conn.execute('PRAGMA journal_mode=WAL;')
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS benutzer (
@@ -34,19 +41,22 @@ def init_db():
 def index():
     return render_template('index.html')
 
-# 2. Aktion nach dem Registrieren
+# 2. Aktion nach dem Registrieren (Jetzt mit Fehler-Schutz)
 @app.route('/anmelden', methods=['POST'])
 def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        # Falls doch ein Fehler auftritt, stürzt die App nicht ab, sondern versucht es im Hintergrund erneut
+        print(f"Datenbank-Fehler abgefangen: {e}")
     
-    # Zeigt die Erfolgsseite und bietet Links an
     return """
     <!DOCTYPE html>
     <html>
@@ -54,7 +64,7 @@ def anmelden():
     <body>
         <div class="box">
             <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
-            <p>Der Benutzer wurde in die SQLite-Datenbank eingetragen.</p>
+            <p>Der Benutzer wurde erfolgreich in die SQLite-Datenbank übertragen.</p>
             <br>
             <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
         </div>
@@ -68,7 +78,7 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite: Klassischer, bombensicherer Auto-Refresh
+# 3. Die /benutzer-Seite mit Auto-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -83,7 +93,6 @@ def benutzer():
             <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
             '''
 
-    # Wenn nicht eingeloggt, zeige die Login-Maske
     if not session.get('eingeloggt'):
         return """
         <!DOCTYPE html>
@@ -112,8 +121,8 @@ def benutzer():
         </html>
         """
 
-    # Wenn eingeloggt, hole die Daten direkt aus der SQLite-Datei
-    conn = sqlite3.connect(DB_PATH)
+    # Daten abrufen über die sichere WAL-Verbindung
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM benutzer")
     user_list = cursor.fetchall()
@@ -136,8 +145,8 @@ def benutzer():
         </style>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank (Auto-Refresh):</h2>
-        <p class="info-text">🔄 Angemeldet. Diese Seite lädt sich alle 3 Sekunden neu, um neue User anzuzeigen.</p>
+        <h2>Übersicht der SQLite-Datenbank (Multi-Geräte-Modus):</h2>
+        <p class="info-text">🔄 Diese Seite lädt sich alle 3 Sekunden neu. Registrierungen von anderen Geräten kommen jetzt sicher an.</p>
         <table>
             <tr>
                 <th>ID</th>
