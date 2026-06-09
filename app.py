@@ -3,7 +3,6 @@ import sqlite3
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 
 app = Flask(__name__)
-# Der Secret Key hält deine Session im geöffneten Browser-Tab aktiv
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
 
 DB_PATH = 'datenbank.db'
@@ -33,6 +32,14 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+
+# Erlaubt den Live-Datenabruf über verschiedene Browser hinweg ohne Blockade
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # 1. Startseite: Lädt dein Register-Formular
 @app.route('/')
@@ -71,7 +78,6 @@ def anmelden():
 # Geheimer Hintergrund-Kanal für die JavaScript-Live-Daten
 @app.route('/api/live-daten')
 def live_daten():
-    # Wenn der Admin nicht mehr eingeloggt ist, darf JavaScript nichts sehen
     if not session.get('eingeloggt'):
         return jsonify([])
     
@@ -83,13 +89,13 @@ def live_daten():
     user_list = [ [row['id'], row['name'], row['passwort']] for row in rows ]
     return jsonify(user_list)
 
-# Route zum Abmelden (Löscht die Session komplett)
+# Route zum Abmelden
 @app.route('/logout')
 def logout():
-    session.clear() # Löscht alle Login-Daten im Browser
+    session.clear()
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite mit geschütztem Login und funktionierendem JavaScript-Live-Refresh
+# 3. Die /benutzer-Seite mit geschütztem Login und JavaScript-Live-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -97,14 +103,13 @@ def benutzer():
         password = request.form.get('password')
         
         if username in ERLAUBTE_ADMINS and ERLAUBTE_ADMINS[username] == password:
-            session['eingeloggt'] = True  # Bleibt aktiv, bis das Tab geschlossen oder Logout geklickt wird
+            session['eingeloggt'] = True  
             return redirect(url_for('benutzer'))
         else:
             return '''
             <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
             '''
 
-    # Falls nicht eingeloggt, zeige die Login-Maske
     if not session.get('eingeloggt'):
         return """
         <!DOCTYPE html>
@@ -133,7 +138,6 @@ def benutzer():
         </html>
         """
 
-    # Wenn eingeloggt, liefere das HTML mit funktionierendem Live-Skript aus
     return """
     <!DOCTYPE html>
     <html>
@@ -152,7 +156,8 @@ def benutzer():
         <script>
             async function ladeDatenLive() {
                 try {
-                    let response = await fetch('/api/live-daten');
+                    // cache: "no-store" zwingt Chrome dazu, die echten Live-Daten zu holen, statt alte Daten anzuzeigen
+                    let response = await fetch('/api/live-daten', { cache: "no-store" });
                     let userList = await response.json();
                     let tabelleBody = document.getElementById('user-table-body');
                     
@@ -171,7 +176,6 @@ def benutzer():
                 }
             }
             
-            // Holt die Daten alle 2 Sekunden vollautomatisch live auf den Schirm
             setInterval(ladeDatenLive, 2000);
             window.onload = ladeDatenLive;
         </script>
