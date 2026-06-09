@@ -1,5 +1,4 @@
 import os
-import DictCursor
 import time
 import uuid
 from flask import Flask, render_template, request, session, redirect, url_for
