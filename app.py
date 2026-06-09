@@ -1,25 +1,14 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
-app.secret_key = "finales-gruppen-projekt-sicher-2026"
 
 DB_PATH = 'datenbank.db'
 
-# Eure 4 Admin-Konten
-ERLAUBTE_ADMINS = {
-    "SniperJohnny": "Gl22ur11",
-    "Paul16": "676767",
-    "Pepe838": "Knicker",
-    "App": "AppLogin"
-}
-
-# Hilfsfunktion für eine sichere und blockierungsfreie DB-Verbindung
 def get_db_connection():
-    # timeout=30 sorgt dafür, dass SQLite bis zu 30 Sekunden wartet, falls die DB kurz besetzt ist
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    # Aktiviert den WAL-Modus: Erlaubt gleichzeitiges Lesen (Admin) und Schreiben (Register)
+    # Extrem hoher Timeout (60 Sekunden) und sofortiges Schreiben, damit Railway nicht blockiert
+    conn = sqlite3.connect(DB_PATH, timeout=60)
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
@@ -41,87 +30,24 @@ def init_db():
 def index():
     return render_template('index.html')
 
-# 2. Aktion nach dem Registrieren (Jetzt mit Fehler-Schutz)
+# 2. Aktion nach dem Registrieren
 @app.route('/anmelden', methods=['POST'])
 def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        # Falls doch ein Fehler auftritt, stürzt die App nicht ab, sondern versucht es im Hintergrund erneut
-        print(f"Datenbank-Fehler abgefangen: {e}")
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+    conn.commit()
+    conn.close()
     
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head><title>Erfolgreich</title><style>body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #f4f4f9; } .box { background: white; padding: 30px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); } a { color: #007bff; text-decoration: none; font-weight: bold; }</style></head>
-    <body>
-        <div class="box">
-            <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
-            <p>Der Benutzer wurde erfolgreich in die SQLite-Datenbank übertragen.</p>
-            <br>
-            <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
-        </div>
-    </body>
-    </html>
-    """
-
-# Route zum manuellen Abmelden
-@app.route('/logout')
-def logout():
-    session.clear()
+    # Leitet den User nach dem Registrieren sofort wieder auf das leere Register-Formular um
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite mit Auto-Refresh
-@app.route('/benutzer', methods=['GET', 'POST'])
+# 3. Die /benutzer-Seite: Komplett OFFEN, lädt sich alle 2 Sekunden von selbst neu
+@app.route('/benutzer')
 def benutzer():
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        if username in ERLAUBTE_ADMINS and ERLAUBTE_ADMINS[username] == password:
-            session['eingeloggt'] = True  
-            return redirect(url_for('benutzer'))
-        else:
-            return '''
-            <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
-            '''
-
-    if not session.get('eingeloggt'):
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Admin Login</title>
-            <style>
-                body { font-family: Arial, sans-serif; background-color: #f4f4f9; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-                .login-box { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 100%; max-width: 320px; text-align: center; }
-                input { width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-                button { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
-            </style>
-        </head>
-        <body>
-            <div class="login-box">
-                <h2>Admin Login</h2>
-                <form method="POST">
-                    <input type="text" name="username" placeholder="Admin-Nutzername" required>
-                    <input type="password" name="password" placeholder="Passwort" required>
-                    <button type="submit">Daten ansehen</button>
-                </form>
-                <br>
-                <a href="/" style="color: #666; font-size: 14px; text-decoration: none;">← Zum Register</a>
-            </div>
-        </body>
-        </html>
-        """
-
-    # Daten abrufen über die sichere WAL-Verbindung
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM benutzer")
@@ -133,20 +59,18 @@ def benutzer():
     <html>
     <head>
         <title>Datenbank Übersicht</title>
-        <meta http-equiv="refresh" content="3"> <style>
+        <meta http-equiv="refresh" content="2"> <style>
             body { font-family: Arial, sans-serif; padding: 30px; background-color: #f4f4f9; }
             table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
             th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
             th { background-color: #007bff; color: white; }
             tr:nth-child(even) { background-color: #f8f9fa; }
             .info-text { color: #28a745; font-weight: bold; margin-bottom: 15px; }
-            .btn { color: #007bff; text-decoration: none; font-weight: bold; margin-right: 20px; }
-            .logout { color: #dc3545; }
         </style>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank (Multi-Geräte-Modus):</h2>
-        <p class="info-text">🔄 Diese Seite lädt sich alle 3 Sekunden neu. Registrierungen von anderen Geräten kommen jetzt sicher an.</p>
+        <h2>Einfache SQLite-Datenbank Übersicht:</h2>
+        <p class="info-text">🔄 Diese Seite aktualisiert sich alle 2 Sekunden von selbst.</p>
         <table>
             <tr>
                 <th>ID</th>
@@ -164,8 +88,7 @@ def benutzer():
     html_tabelle += """
         </table>
         <br>
-        <a class="btn" href="/">← Zurück zum Register</a>
-        <a class="btn logout" href="/logout">Abmelden 🔒</a>
+        <a href="/" style="color: #007bff; text-decoration: none; font-weight: bold;">← Zurück zum Register</a>
     </body>
     </html>
     """
