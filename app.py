@@ -1,13 +1,14 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, session
+import json
+from flask import Flask, render_template, request, session, jsonify
 
 app = Flask(__name__)
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
 
 DB_PATH = 'datenbank.db'
 
-# Die von dir gewünschten 4 Admin-Konten für den geschützten Bereich
+# Eure 4 Admin-Konten
 ERLAUBTE_ADMINS = {
     "SniperJohnny": "Gl22ur11",
     "Paul16": "676767",
@@ -39,15 +40,11 @@ def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    # Verbindung mit speziellen Live-Schreibrechten öffnen
     conn = sqlite3.connect(DB_PATH, isolation_level=None) 
     cursor = conn.cursor()
-    
-    # WAL-Modus aktivieren (Zwingt SQLite zu sofortigen Live-Updates auf Railway)
     cursor.execute('PRAGMA journal_mode=WAL;')
-    
     cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-    conn.close() # Schließen erzwingt das finale Speichern auf Railway
+    conn.close() 
     
     return """
     <!DOCTYPE html>
@@ -56,7 +53,6 @@ def anmelden():
     <body>
         <div class="box">
             <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
-            <p>Die Daten wurden dauerhaft und live in die SQLite-Datenbank übertragen.</p>
             <br>
             <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
         </div>
@@ -64,7 +60,25 @@ def anmelden():
     </html>
     """
 
-# 3. Die /benutzer-Seite mit Passwort-Schutz UND Auto-Live-Refresh
+# NEU: Ein geheimer Hintergrund-Kanal, der nur die reinen User-Daten als JSON liefert
+@app.route('/api/live-daten')
+def live_daten():
+    if not session.get('eingeloggt'):
+        return jsonify([])
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM benutzer")
+    user_list = cursor.fetchall()
+    conn.close()
+    return jsonify(user_list)
+
+# Route zum manuellen Abmelden
+@app.route('/logout')
+def logout():
+    session.pop('eingeloggt', None)
+    return redirect(url_for('index'))
+
+# 3. Die /benutzer-Seite mit geschütztem Login und echtem JavaScript-Live-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -106,55 +120,70 @@ def benutzer():
         </html>
         """
 
-    # Session sofort wieder zerstören, damit man sich beim nächsten Laden neu anmelden MUSS
-    session['eingeloggt'] = False 
-
-    # Daten frisch abrufen
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM benutzer")
-    user_list = cursor.fetchall()
-    conn.close()
-    
-    html_tabelle = """
+    # --- Ab hier ist der Admin eingeloggt ---
+    return """
     <!DOCTYPE html>
     <html>
     <head>
         <title>Datenbank Übersicht</title>
-        <meta http-equiv="refresh" content="3"> <style>
+        <style>
             body { font-family: Arial, sans-serif; padding: 30px; background-color: #f4f4f9; }
             table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
             th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
             th { background-color: #007bff; color: white; }
             tr:nth-child(even) { background-color: #f8f9fa; }
             .info-text { color: #28a745; font-weight: bold; margin-bottom: 15px; }
+            .btn { color: #007bff; text-decoration: none; font-weight: bold; margin-right: 20px; }
+            .logout { color: #dc3545; }
         </style>
+        <script>
+            // Diese Funktion holt alle 3 Sekunden lautlos die neuen Daten, ohne die Seite neu zu laden!
+            async function ladeDatenLive() {
+                try {
+                    let response = await fetch('/api/live-daten');
+                    let userList = await response.json();
+                    let tabelleBody = document.getElementById('user-table-body');
+                    
+                    if (userList.length === 0) {
+                        tabelleBody.innerHTML = "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>";
+                        return;
+                    }
+                    
+                    let html = "";
+                    userList.forEach(user => {
+                        html += `<tr><td>${user[0]}</td><td>${user[1]}</td><td>${user[2]}</td></tr>`;
+                    });
+                    tabelleBody.innerHTML = html;
+                } catch (e) {
+                    console.log("Fehler beim Live-Laden", e);
+                }
+            }
+            
+            // Starte den Timer (alle 3000 Millisekunden = 3 Sekunden)
+            setInterval(ladeDatenLive, 3000);
+            window.onload = ladeDatenLive;
+        </script>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank (Live):</h2>
-        <p class="info-text">🔄 Diese Übersicht aktualisiert sich alle 3 Sekunden automatisch live mit neuen Registrierungen!</p>
+        <h2>Übersicht der SQLite-Datenbank (Echte Live-Anzeige):</h2>
+        <p class="info-text">🔒 Angemeldet als Admin. Neue User ploppen hier sofort automatisch auf.</p>
         <table>
-            <tr>
-                <th>ID</th>
-                <th>Benutzername</th>
-                <th>Passwort</th>
-            </tr>
-    """
-    
-    for user in user_list:
-        html_tabelle += f"<tr><td>{user[0]}</td><td>{user[1]}</td><td>{user[2]}</td></tr>"
-        
-    if not user_list:
-        html_tabelle += "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>"
-        
-    html_tabelle += """
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Benutzername</th>
+                    <th>Passwort</th>
+                </tr>
+            </thead>
+            <tbody id="user-table-body">
+                </tbody>
         </table>
         <br>
-        <a href="/" style="color: #007bff; text-decoration: none; font-weight: bold;">← Zurück zum Register</a>
+        <a class="btn" href="/">← Zurück zum Register</a>
+        <a class="btn logout" href="/logout">Abmelden 🔒</a>
     </body>
     </html>
     """
-    return html_tabelle
 
 if __name__ == '__main__':
     init_db()
