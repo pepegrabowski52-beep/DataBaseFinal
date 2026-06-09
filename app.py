@@ -1,7 +1,6 @@
 import os
 import sqlite3
-import json
-from flask import Flask, render_template, request, session, jsonify
+from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 
 app = Flask(__name__)
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
@@ -16,10 +15,18 @@ ERLAUBTE_ADMINS = {
     "App": "AppLogin"
 }
 
+# Hilfsfunktion, um eine sichere Verbindung zur DB aufzubauen (verhindert Sperren)
+def get_db_connection():
+    # timeout=20 zwingt den Server, bis zu 20 Sekunden zu warten, falls die DB gerade blockiert ist
+    conn = sqlite3.connect(DB_PATH, timeout=20)
+    conn.row_factory = sqlite3.Row
+    # Aktiviert den WAL-Modus für echtes gleichzeitiges Schreiben und Lesen
+    conn.execute('PRAGMA journal_mode=WAL;')
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
+    conn = get_db_connection()
+    conn.execute('''
         CREATE TABLE IF NOT EXISTS benutzer (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -40,11 +47,13 @@ def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    conn = sqlite3.connect(DB_PATH, isolation_level=None) 
-    cursor = conn.cursor()
-    cursor.execute('PRAGMA journal_mode=WAL;')
-    cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-    conn.close() 
+    try:
+        conn = get_db_connection()
+        conn.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Fehler beim Speichern: {e}")
     
     return """
     <!DOCTYPE html>
@@ -53,6 +62,7 @@ def anmelden():
     <body>
         <div class="box">
             <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
+            <p>Die Daten wurden dauerhaft und live in die SQLite-Datenbank übertragen.</p>
             <br>
             <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
         </div>
@@ -60,25 +70,28 @@ def anmelden():
     </html>
     """
 
-# NEU: Ein geheimer Hintergrund-Kanal, der nur die reinen User-Daten als JSON liefert
+# Geheimer Hintergrund-Kanal für die JavaScript-Live-Daten
 @app.route('/api/live-daten')
 def live_daten():
     if not session.get('eingeloggt'):
         return jsonify([])
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM benutzer")
-    user_list = cursor.fetchall()
+    
+    conn = get_db_connection()
+    cursor = conn.execute("SELECT * FROM benutzer")
+    rows = cursor.fetchall()
     conn.close()
+    
+    # Daten für JavaScript lesbar machen
+    user_list = [ [row['id'], row['name'], row['passwort']] for row in rows ]
     return jsonify(user_list)
 
-# Route zum manuellen Abmelden
+# Route zum Abmelden
 @app.route('/logout')
 def logout():
     session.pop('eingeloggt', None)
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite mit geschütztem Login und echtem JavaScript-Live-Refresh
+# 3. Die /benutzer-Seite mit geschütztem Login und JavaScript-Live-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -120,7 +133,6 @@ def benutzer():
         </html>
         """
 
-    # --- Ab hier ist der Admin eingeloggt ---
     return """
     <!DOCTYPE html>
     <html>
@@ -137,7 +149,6 @@ def benutzer():
             .logout { color: #dc3545; }
         </style>
         <script>
-            // Diese Funktion holt alle 3 Sekunden lautlos die neuen Daten, ohne die Seite neu zu laden!
             async function ladeDatenLive() {
                 try {
                     let response = await fetch('/api/live-daten');
@@ -159,7 +170,6 @@ def benutzer():
                 }
             }
             
-            // Starte den Timer (alle 3000 Millisekunden = 3 Sekunden)
             setInterval(ladeDatenLive, 3000);
             window.onload = ladeDatenLive;
         </script>
