@@ -7,6 +7,20 @@ app = Flask(__name__)
 VALID_USERNAME = "gruppe4"
 VALID_PASSWORD = "mein-sicheres-passwort123"
 
+# DIESER NEUE BLOCK ERSTELLT DIE DATENBANK AUTOMATISCH BEIM START
+def init_db():
+    conn = sqlite3.connect('datenbank.db')
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS benutzer (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            passwort TEXT NOT NULL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -39,7 +53,6 @@ def benutzer():
     return render_template('benutzer.html', benutzer=user_list)
 
 if __name__ == '__main__':
-    # Dieser Block ist absolut Pflicht für Railway
+    init_db()  # <--- Startet die automatische Datenbank-Erstellung
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
-
