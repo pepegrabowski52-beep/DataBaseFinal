@@ -3,6 +3,7 @@ import sqlite3
 from flask import Flask, render_template, request, session, redirect, url_for, jsonify
 
 app = Flask(__name__)
+# Der Secret Key hält deine Session im geöffneten Browser-Tab aktiv
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
 
 DB_PATH = 'datenbank.db'
@@ -15,12 +16,9 @@ ERLAUBTE_ADMINS = {
     "App": "AppLogin"
 }
 
-# Hilfsfunktion, um eine sichere Verbindung zur DB aufzubauen (verhindert Sperren)
 def get_db_connection():
-    # timeout=20 zwingt den Server, bis zu 20 Sekunden zu warten, falls die DB gerade blockiert ist
     conn = sqlite3.connect(DB_PATH, timeout=20)
     conn.row_factory = sqlite3.Row
-    # Aktiviert den WAL-Modus für echtes gleichzeitiges Schreiben und Lesen
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
@@ -73,6 +71,7 @@ def anmelden():
 # Geheimer Hintergrund-Kanal für die JavaScript-Live-Daten
 @app.route('/api/live-daten')
 def live_daten():
+    # Wenn der Admin nicht mehr eingeloggt ist, darf JavaScript nichts sehen
     if not session.get('eingeloggt'):
         return jsonify([])
     
@@ -81,17 +80,16 @@ def live_daten():
     rows = cursor.fetchall()
     conn.close()
     
-    # Daten für JavaScript lesbar machen
     user_list = [ [row['id'], row['name'], row['passwort']] for row in rows ]
     return jsonify(user_list)
 
-# Route zum Abmelden
+# Route zum Abmelden (Löscht die Session komplett)
 @app.route('/logout')
 def logout():
-    session.pop('eingeloggt', None)
+    session.clear() # Löscht alle Login-Daten im Browser
     return redirect(url_for('index'))
 
-# 3. Die /benutzer-Seite mit geschütztem Login und JavaScript-Live-Refresh
+# 3. Die /benutzer-Seite mit geschütztem Login und funktionierendem JavaScript-Live-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -99,12 +97,14 @@ def benutzer():
         password = request.form.get('password')
         
         if username in ERLAUBTE_ADMINS and ERLAUBTE_ADMINS[username] == password:
-            session['eingeloggt'] = True  
+            session['eingeloggt'] = True  # Bleibt aktiv, bis das Tab geschlossen oder Logout geklickt wird
+            return redirect(url_for('benutzer'))
         else:
             return '''
             <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
             '''
 
+    # Falls nicht eingeloggt, zeige die Login-Maske
     if not session.get('eingeloggt'):
         return """
         <!DOCTYPE html>
@@ -133,6 +133,7 @@ def benutzer():
         </html>
         """
 
+    # Wenn eingeloggt, liefere das HTML mit funktionierendem Live-Skript aus
     return """
     <!DOCTYPE html>
     <html>
@@ -155,7 +156,7 @@ def benutzer():
                     let userList = await response.json();
                     let tabelleBody = document.getElementById('user-table-body');
                     
-                    if (userList.length === 0) {
+                    if (!userList || userList.length === 0) {
                         tabelleBody.innerHTML = "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>";
                         return;
                     }
@@ -170,13 +171,14 @@ def benutzer():
                 }
             }
             
-            setInterval(ladeDatenLive, 3000);
+            // Holt die Daten alle 2 Sekunden vollautomatisch live auf den Schirm
+            setInterval(ladeDatenLive, 2000);
             window.onload = ladeDatenLive;
         </script>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank (Echte Live-Anzeige):</h2>
-        <p class="info-text">🔒 Angemeldet als Admin. Neue User ploppen hier sofort automatisch auf.</p>
+        <h2>Übersicht der SQLite-Datenbank (Live-Ansicht):</h2>
+        <p class="info-text">🔒 Angemeldet als Admin. Neue User ploppen hier alle 2 Sekunden völlig automatisch live auf!</p>
         <table>
             <thead>
                 <tr>
