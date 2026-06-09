@@ -4,9 +4,13 @@ from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
 
-# Zugangsdaten für die /benutzer Seite (Das Admin-Login)
-VALID_USERNAME = "gruppe4"
-VALID_PASSWORD = "mein-sicheres-passwort123"
+# Die einzigen 4 erlaubten Konten für die /benutzer Seite
+ERLAUBTE_BENUTZER = {
+    "mitglied1": "Gruppe4!Sicher2026",
+    "mitglied2": "Datenbank?Flask99",
+    "mitglied3": "Geheim#Projekt4X",
+    "mitglied4": "Railway_Live!77"
+}
 
 # Diese Funktion sorgt dafür, dass die Datenbank und die Tabelle 
 # automatisch erstellt werden, falls sie auf dem Server fehlen.
@@ -47,7 +51,9 @@ def anmelden():
 @app.route('/benutzer')
 def benutzer():
     auth = request.authorization
-    if not auth or auth.username != VALID_USERNAME or auth.password != VALID_PASSWORD:
+    
+    # Prüfen, ob der eingegebene Nutzer existiert UND das Passwort stimmt
+    if not auth or auth.username not in ERLAUBTE_BENUTZER or ERLAUBTE_BENUTZER[auth.username] != auth.password:
         return ('Bitte anmelden!', 401, {'WWW-Authenticate': 'Basic realm="Login erforderlich"'})
     
     conn = sqlite3.connect('datenbank.db')
