@@ -1,12 +1,12 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, session, redirect, url_for
+from flask import Flask, render_template, request, session
 
 app = Flask(__name__)
-# Der Secret Key sorgt dafür, dass die Sitzung (Session) sicher verschlüsselt wird
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
 
-DB_PATH = '/tmp/datenbank.db'
+# WICHTIG: Wieder der normale Pfad, damit Railway die Datei permanent speichert!
+DB_PATH = 'datenbank.db'
 
 # Eure 4 Admin-Konten
 ERLAUBTE_ADMINS = {
@@ -41,9 +41,10 @@ def anmelden():
     passwort = request.form['passwort']
     
     conn = sqlite3.connect(DB_PATH)
+    # Das sorgt dafür, dass die Daten SOFORT live geschrieben werden
+    conn.isolation_level = None 
     cursor = conn.cursor()
     cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-    conn.commit()
     conn.close()
     
     return """
@@ -60,22 +61,20 @@ def anmelden():
     </html>
     """
 
-# 3. Die /benutzer-Seite: Prüft, ob man in DIESEM Moment angemeldet ist
+# 3. Die /benutzer-Seite mit permanentem Passwort-Schutz bei jedem Aufruf
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
-    # Wenn der Admin das Login-Formular abschickt:
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
         
         if username in ERLAUBTE_ADMINS and ERLAUBTE_ADMINS[username] == password:
-            session['eingeloggt'] = True  # Erlaube Zugriff für diesen Klick
+            session['eingeloggt'] = True  
         else:
             return '''
             <script>alert("Falsche Admin-Daten!"); window.location.href="/benutzer";</script>
             '''
 
-    # WICHTIG: Wenn man nicht frisch eingeloggt ist, zeige die Login-Maske
     if not session.get('eingeloggt'):
         return """
         <!DOCTYPE html>
@@ -104,10 +103,7 @@ def benutzer():
         </html>
         """
 
-    # --- AB HIER: Der Admin ist eingeloggt und sieht die Tabelle ---
-    
-    # TRICK: Wir zerstören die Session SOFORT wieder für den nächsten Aufruf!
-    # Dadurch muss man sich beim nächsten Mal oder beim Aktualisieren IMMER neu anmelden.
+    # Session sofort wieder löschen, damit man sich beim nächsten Klick neu anmelden MUSS
     session['eingeloggt'] = False 
 
     conn = sqlite3.connect(DB_PATH)
