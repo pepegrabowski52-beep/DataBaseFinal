@@ -10,10 +10,10 @@ DB_PATH = 'datenbank.db'
 
 # Eure 4 Admin-Konten
 ERLAUBTE_ADMINS = {
-    "mitglied1": "Gruppe4!Sicher2026",
-    "mitglied2": "Datenbank?Flask99",
-    "mitglied3": "Geheim#Projekt4X",
-    "mitglied4": "Railway_Live!77"
+    "SniperJohnny": "Gl22ur11",
+    "Paul16": "676767",
+    "Pepe838": "Knicker",
+    "App": "AppLogin"
 }
 
 def init_db():
