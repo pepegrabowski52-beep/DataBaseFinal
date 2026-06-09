@@ -1,55 +1,29 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from flask import Flask, render_template, request, redirect, url_for
 
 app = Flask(__name__)
-app.secret_key = "super-geheimes-gruppen-geheimnis" # Wichtig für Sessions
 
-# Diese Funktion erstellt BEIDE Tabellen automatisch beim Start
+# Erstellt die einfache Datenbank für deine User
 def init_db():
     conn = sqlite3.connect('datenbank.db')
     cursor = conn.cursor()
-    
-    # Tabelle 1: Für die Leute, die sich auf der Startseite registrieren
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS registrierte_user (
+        CREATE TABLE IF NOT EXISTS benutzer (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             passwort TEXT NOT NULL
         )
     ''')
-    
-    # Tabelle 2: Für die 4 Admins, die die Liste sehen dürfen
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS admin_konten (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            passwort TEXT NOT NULL
-        )
-    ''')
-    
-    # Die 4 Admin-Konten in die Datenbank einfügen (falls sie noch nicht existieren)
-    admins = [
-        ("mitglied1", "Gruppe4!Sicher2026"),
-        ("mitglied2", "Datenbank?Flask99"),
-        ("mitglied3", "Geheim#Projekt4X"),
-        ("mitglied4", "Railway_Live!77")
-    ]
-    for name, pw in admins:
-        try:
-            cursor.execute("INSERT INTO admin_konten (name, passwort) VALUES (?, ?)", (name, pw))
-        except sqlite3.IntegrityError:
-            pass # Wenn der Admin schon drin ist, einfach überspringen
-            
     conn.commit()
     conn.close()
 
-# 1. STARTSEITE: Normales Registrierungsformular für User
+# 1. Startseite mit dem Registrierungsformular
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Aktion für die Startseite: Speichert User in "registrierte_user"
+# 2. Hier landen die Formulardaten und werden in die DB gespeichert
 @app.route('/anmelden', methods=['POST'])
 def anmelden():
     benutzername = request.form['benutzername']
@@ -57,55 +31,24 @@ def anmelden():
     
     conn = sqlite3.connect('datenbank.db')
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO registrierte_user (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+    cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
     conn.commit()
     conn.close()
     
+    # Nach dem Speichern wird man wieder zur Startseite geleitet
     return redirect(url_for('index'))
 
-# 2. ADMIN-LOGIN-SEITE: Hier landen Admins, wenn sie auf /benutzer wollen
-@app.route('/admin-login', methods=['GET', 'POST'])
-def admin_login():
-    if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        
-        conn = sqlite3.connect('datenbank.db')
-        cursor = conn.cursor()
-        # Prüfen, ob Admin in der Tabelle "admin_konten" existiert
-        cursor.execute("SELECT * FROM admin_konten WHERE name = ? AND passwort = ?", (username, password))
-        admin = cursor.fetchone()
-        conn.close()
-        
-        if admin:
-            session['admin_eingeloggt'] = True
-            return redirect(url_for('benutzer'))
-        else:
-            flash("Falscher Admin-Name oder Passwort!")
-            
-    return render_template('admin_login.html')
-
-# 3. DIE GEHEIME DATENBANK-ANSICHT (Zeigt alle registrierten User)
+# 3. Die Übersichtsseite, die man direkt über /benutzer aufruft
 @app.route('/benutzer')
 def benutzer():
-    # Wenn der Admin nicht eingeloggt ist, schicke ihn zum Login-Formular
-    if not session.get('admin_eingeloggt'):
-        return redirect(url_for('admin_login'))
-    
     conn = sqlite3.connect('datenbank.db')
     cursor = conn.cursor()
-    # Holt alle User aus der ersten Tabelle
-    cursor.execute("SELECT * FROM registrierte_user")
+    cursor.execute("SELECT * FROM benutzer")
     user_list = cursor.fetchall()
     conn.close()
     
+    # Schickt die Daten an die benutzer.html
     return render_template('benutzer.html', benutzer=user_list)
-
-# LOGOUT für den Admin
-@app.route('/admin-logout')
-def admin_logout():
-    session.pop('admin_eingeloggt', None)
-    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     init_db()
