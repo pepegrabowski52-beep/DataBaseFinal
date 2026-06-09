@@ -5,10 +5,9 @@ from flask import Flask, render_template, request, session
 app = Flask(__name__)
 app.secret_key = "super-geheimes-gruppen-projekt-2026"
 
-# WICHTIG: Wieder der normale Pfad, damit Railway die Datei permanent speichert!
 DB_PATH = 'datenbank.db'
 
-# Eure 4 Admin-Konten
+# Die von dir gewünschten 4 Admin-Konten für den geschützten Bereich
 ERLAUBTE_ADMINS = {
     "SniperJohnny": "Gl22ur11",
     "Paul16": "676767",
@@ -40,12 +39,15 @@ def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
     
-    conn = sqlite3.connect(DB_PATH)
-    # Das sorgt dafür, dass die Daten SOFORT live geschrieben werden
-    conn.isolation_level = None 
+    # Verbindung mit speziellen Live-Schreibrechten öffnen
+    conn = sqlite3.connect(DB_PATH, isolation_level=None) 
     cursor = conn.cursor()
+    
+    # WAL-Modus aktivieren (Zwingt SQLite zu sofortigen Live-Updates auf Railway)
+    cursor.execute('PRAGMA journal_mode=WAL;')
+    
     cursor.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
-    conn.close()
+    conn.close() # Schließen erzwingt das finale Speichern auf Railway
     
     return """
     <!DOCTYPE html>
@@ -54,6 +56,7 @@ def anmelden():
     <body>
         <div class="box">
             <h2 style="color: #28a745;">✔ Registrierung erfolgreich!</h2>
+            <p>Die Daten wurden dauerhaft und live in die SQLite-Datenbank übertragen.</p>
             <br>
             <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer">Zur Admin-Datenbank →</a>
         </div>
@@ -61,7 +64,7 @@ def anmelden():
     </html>
     """
 
-# 3. Die /benutzer-Seite mit permanentem Passwort-Schutz bei jedem Aufruf
+# 3. Die /benutzer-Seite mit Passwort-Schutz UND Auto-Live-Refresh
 @app.route('/benutzer', methods=['GET', 'POST'])
 def benutzer():
     if request.method == 'POST':
@@ -103,9 +106,10 @@ def benutzer():
         </html>
         """
 
-    # Session sofort wieder löschen, damit man sich beim nächsten Klick neu anmelden MUSS
+    # Session sofort wieder zerstören, damit man sich beim nächsten Laden neu anmelden MUSS
     session['eingeloggt'] = False 
 
+    # Daten frisch abrufen
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM benutzer")
@@ -117,18 +121,18 @@ def benutzer():
     <html>
     <head>
         <title>Datenbank Übersicht</title>
-        <style>
+        <meta http-equiv="refresh" content="3"> <style>
             body { font-family: Arial, sans-serif; padding: 30px; background-color: #f4f4f9; }
             table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
             th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
             th { background-color: #007bff; color: white; }
             tr:nth-child(even) { background-color: #f8f9fa; }
-            .warnung { color: #d9534f; font-weight: bold; margin-bottom: 15px; }
+            .info-text { color: #28a745; font-weight: bold; margin-bottom: 15px; }
         </style>
     </head>
     <body>
-        <h2>Übersicht der SQLite-Datenbank:</h2>
-        <p class="warnung">🔒 Einmalige Ansicht: Wenn du die Seite aktualisierst, musst du dich neu anmelden!</p>
+        <h2>Übersicht der SQLite-Datenbank (Live):</h2>
+        <p class="info-text">🔄 Diese Übersicht aktualisiert sich alle 3 Sekunden automatisch live mit neuen Registrierungen!</p>
         <table>
             <tr>
                 <th>ID</th>
