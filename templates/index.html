@@ -2,96 +2,45 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registrierte Benutzer (Admin-Ansicht)</title>
+    <title>Registrierte Benutzer Übersicht</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 40px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        h1 {
-            color: #333;
-        }
-        .container {
-            width: 100%;
-            max-width: 600px;
-            background: white;
-            padding: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            border-radius: 8px;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            margin-top: 20px;
-        }
-        th, td {
-            padding: 12px 15px;
-            text-align: left;
-        }
-        th {
-            background-color: #007bff;
-            color: white;
-        }
-        tr:nth-child(even) {
-            background-color: #f8f9fa;
-        }
-        tr {
-            border-bottom: 1px solid #dddddd;
-        }
-        .nav-links {
-            margin-top: 20px;
-            display: flex;
-            gap: 20px;
-        }
-        .btn {
-            text-decoration: none;
-            color: #007bff;
-            font-weight: bold;
-        }
-        .logout {
-            color: #dc3545;
-        }
+        body { font-family: Arial, sans-serif; background-color: #f4f4f9; padding: 40px; display: flex; flex-direction: column; align-items: center; }
+        h1 { color: #333; }
+        table { border-collapse: collapse; width: 100%; max-width: 600px; background: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 15px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .back-btn { margin-top: 20px; text-decoration: none; color: #007bff; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h1>Eingetragene User-Datenbank</h1>
+    <h1>Übersicht aller registrierten User</h1>
 
-    <div class="container">
-        <table>
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Benutzername</th>
-                    <th>Passwort</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for user in benutzer %}
-                <tr>
-                    <td>{{ user[0] }}</td>
-                    <td>{{ user[1] }}</td>
-                    <td>{{ user[2] }}</td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="3" style="text-align: center; color: #777;">Noch keine User in der Datenbank registriert.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Benutzername</th>
+                <th>Passwort</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in benutzer %}
+            <tr>
+                <td>{{ user[0] }}</td>
+                <td>{{ user[1] }}</td>
+                <td>{{ user[2] }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align: center; color: #777;">Noch keine Benutzer registriert.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 
-    <div class="nav-links">
-        <a class="btn" href="/">← Zum Registrierungsformular</a>
-        <a class="btn logout" href="/admin-logout">Abmelden (Admin-Session beenden)</a>
-    </div>
+    <a class="back-btn" href="/">← Zurück zum Register</a>
 
 </body>
 </html>
