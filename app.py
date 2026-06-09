@@ -1,14 +1,15 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for
+import time
+from flask import Flask, render_template, request
 
 app = Flask(__name__)
 
-DB_PATH = 'datenbank.db'
+# Einzigartiger Name im beschreibbaren /tmp/ Ordner, damit Railway niemals blockiert
+DB_PATH = f'/tmp/datenbank_{int(time.time())}.db'
 
 def get_db_connection():
-    # Extrem hoher Timeout (60 Sekunden) und sofortiges Schreiben, damit Railway nicht blockiert
-    conn = sqlite3.connect(DB_PATH, timeout=60)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
@@ -30,7 +31,7 @@ def init_db():
 def index():
     return render_template('index.html')
 
-# 2. Aktion nach dem Registrieren
+# 2. Aktion nach dem Registrieren: Hier kommt deine gewünschte Nachricht!
 @app.route('/anmelden', methods=['POST'])
 def anmelden():
     benutzername = request.form['benutzername']
@@ -42,10 +43,30 @@ def anmelden():
     conn.commit()
     conn.close()
     
-    # Leitet den User nach dem Registrieren sofort wieder auf das leere Register-Formular um
-    return redirect(url_for('index'))
+    # Die Erfolgsnachricht, damit du weißt, dass das Abschicken geklappt hat
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Registrierung Erfolgreich</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #f4f4f9; }
+            .box { background: white; padding: 30px; display: inline-block; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+            a { color: #007bff; text-decoration: none; font-weight: bold; }
+        </style>
+    </head>
+    <body>
+        <div class="box">
+            <h2 style="color: #28a745;">✔ Benutzer wurde erstellt!</h2>
+            <p>Name: <strong>""" + benutzername + """</strong> wurde in die Live-Datenbank eingetragen.</p>
+            <br>
+            <a href="/">← Weiteren Benutzer registrieren</a> | <a href="/benutzer" target="_blank">Zur Live-Übersicht (Neues Tab) →</a>
+        </div>
+    </body>
+    </html>
+    """
 
-# 3. Die /benutzer-Seite: Komplett OFFEN, lädt sich alle 2 Sekunden von selbst neu
+# 3. Die /benutzer-Seite: Komplett offen, aktualisiert sich alle 2 Sekunden von selbst
 @app.route('/benutzer')
 def benutzer():
     conn = get_db_connection()
@@ -83,7 +104,7 @@ def benutzer():
         html_tabelle += f"<tr><td>{user[0]}</td><td>{user[1]}</td><td>{user[2]}</td></tr>"
         
     if not user_list:
-        html_tabelle += "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden.</td></tr>"
+        html_tabelle += "<tr><td colspan='3' style='text-align:center;'>Noch keine Daten vorhanden. Datenbank ist bereit!</td></tr>"
         
     html_tabelle += """
         </table>
