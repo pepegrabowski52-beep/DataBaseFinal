@@ -1,13 +1,12 @@
 import os
-import sqlite3
+import psycopg2
+from psycopg2.extras import DictCursor
 import time
 import uuid
 from flask import Flask, render_template, request, session, redirect, url_for
 
 app = Flask(__name__)
 app.secret_key = "ultratiefes-geheimnis-gruppe-4-2026"
-
-DB_PATH = '/tmp/datenbank_live.db'
 
 ERLAUBTE_ADMINS = {
     "SniperJohnny": "Gl22ur11",
@@ -16,22 +15,26 @@ ERLAUBTE_ADMINS = {
     "App": "AppLogin"
 }
 
+# Verbindung zur permanenten PostgreSQL Datenbank herstellen
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.execute('PRAGMA journal_mode=WAL;')
-    conn.row_factory = sqlite3.Row
+    # Railway stellt die DATABASE_URL automatisch bereit
+    db_url = os.environ.get('DATABASE_URL')
+    conn = psycopg2.connect(db_url)
     return conn
 
 def init_db():
     conn = get_db_connection()
-    conn.execute('''
+    cur = conn.cursor()
+    # Tabelle für die User (SERIAL entspricht AUTOINCREMENT)
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS benutzer (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT NOT NULL,
             passwort TEXT NOT NULL
         )
     ''')
-    conn.execute('''
+    # Tabelle für die Admin-Sitzungen
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS admin_sessions (
             username TEXT PRIMARY KEY,
             session_token TEXT NOT NULL,
@@ -39,13 +42,17 @@ def init_db():
         )
     ''')
     conn.commit()
+    cur.close()
     conn.close()
 
 def check_admin_session():
     if not session.get('admin_logged_in') or not session.get('username') or not session.get('token'):
         return False
     conn = get_db_connection()
-    row = conn.execute("SELECT session_token FROM admin_sessions WHERE username = ?", (session['username'],)).fetchone()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT session_token FROM admin_sessions WHERE username = %s", (session['username'],))
+    row = cur.fetchone()
+    cur.close()
     conn.close()
     if row and row['session_token'] == session['token']:
         return True
@@ -59,10 +66,14 @@ def index():
 def anmelden():
     benutzername = request.form['benutzername']
     passwort = request.form['passwort']
+    
     conn = get_db_connection()
-    conn.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (benutzername, passwort))
+    cur = conn.cursor()
+    cur.execute("INSERT INTO benutzer (name, passwort) VALUES (%s, %s)", (benutzername, passwort))
     conn.commit()
+    cur.close()
     conn.close()
+    
     return """
     <!DOCTYPE html>
     <html>
@@ -82,7 +93,7 @@ def anmelden():
     <body>
         <div class="box">
             <h2>✔ Registrierung erfolgreich</h2>
-            <p>Der Benutzer wurde verschlüsselt in die SQLite-Live-Datenbank eingetragen.</p>
+            <p>Der Benutzer wurde dauerhaft in der PostgreSQL-Datenbank gespeichert.</p>
             <a class="btn" href="/">Weiterer Benutzer</a>
             <a class="btn btn-sec" href="/geheimer-admin-bereich">Admin-Bereich →</a>
         </div>
@@ -94,8 +105,10 @@ def anmelden():
 def logout():
     if session.get('username'):
         conn = get_db_connection()
-        conn.execute("DELETE FROM admin_sessions WHERE username = ?", (session['username'],))
+        cur = conn.cursor()
+        cur.execute("DELETE FROM admin_sessions WHERE username = %s", (session['username'],))
         conn.commit()
+        cur.close()
         conn.close()
     session.clear()
     return redirect('/geheimer-admin-bereich')
@@ -104,8 +117,10 @@ def logout():
 def delete_user(user_id):
     if not check_admin_session(): return redirect('/geheimer-admin-bereich')
     conn = get_db_connection()
-    conn.execute("DELETE FROM benutzer WHERE id = ?", (user_id,))
+    cur = conn.cursor()
+    cur.execute("DELETE FROM benutzer WHERE id = %s", (user_id,))
     conn.commit()
+    cur.close()
     conn.close()
     return redirect(request.referrer or '/geheimer-admin-bereich')
 
@@ -115,12 +130,13 @@ def edit_user(user_id):
     neuer_name = request.form.get('name')
     neues_pw = request.form.get('passwort')
     conn = get_db_connection()
-    conn.execute("UPDATE benutzer SET name = ?, passwort = ? WHERE id = ?", (neuer_name, neues_pw, user_id))
+    cur = conn.cursor()
+    cur.execute("UPDATE benutzer SET name = %s, passwort = %s WHERE id = %s", (neuer_name, neues_pw, user_id))
     conn.commit()
+    cur.close()
     conn.close()
     return redirect(request.referrer or '/geheimer-admin-bereich')
 
-# Route für den aktiven Admin: Entscheidung ob er den Platz freigibt oder behält
 @app.route('/admin/kick-decision', methods=['POST'])
 def kick_decision():
     if not check_admin_session(): return redirect('/geheimer-admin-bereich')
@@ -128,17 +144,18 @@ def kick_decision():
     username = session['username']
     
     conn = get_db_connection()
+    cur = conn.cursor()
     if decision == 'yes':
-        # Er stimmt zu -> Wir löschen die Session aus der DB. Beim nächsten Refresh fliegt er raus.
-        conn.execute("DELETE FROM admin_sessions WHERE username = ?", (username,))
+        cur.execute("DELETE FROM admin_sessions WHERE username = %s", (username,))
         conn.commit()
+        cur.close()
         conn.close()
         session.clear()
         return redirect('/geheimer-admin-bereich')
     else:
-        # Er lehnt ab -> Der andere wartende Nutzer wird abgewiesen, der Modus wird zurückgesetzt
-        conn.execute("UPDATE admin_sessions SET pending_kick = 0 WHERE username = ?", (username,))
+        cur.execute("UPDATE admin_sessions SET pending_kick = 0 WHERE username = %s", (username,))
         conn.commit()
+        cur.close()
         conn.close()
         return redirect(request.referrer or '/geheimer-admin-bereich')
 
@@ -150,12 +167,14 @@ def admin_bereich():
         
         if username in ERLAUBTE_ADMINS and ERLAUBTE_ADMINS[username] == password:
             conn = get_db_connection()
-            existing = conn.execute("SELECT session_token FROM admin_sessions WHERE username = ?", (username,)).fetchone()
+            cur = conn.cursor(cursor_factory=DictCursor)
+            cur.execute("SELECT session_token FROM admin_sessions WHERE username = %s", (username,))
+            existing = cur.fetchone()
             
             if existing:
-                # Es ist bereits ein Admin online! Wir setzen das Signal "Anfrage läuft"
-                conn.execute("UPDATE admin_sessions SET pending_kick = 1 WHERE username = ?", (username,))
+                cur.execute("UPDATE admin_sessions SET pending_kick = 1 WHERE username = %s", (username,))
                 conn.commit()
+                cur.close()
                 conn.close()
                 return """
                 <script>
@@ -164,10 +183,10 @@ def admin_bereich():
                 </script>
                 """
             else:
-                # Frei -> Login starten
                 neues_token = str(uuid.uuid4())
-                conn.execute("INSERT OR REPLACE INTO admin_sessions (username, session_token, pending_kick) VALUES (?, ?, 0)", (username, neues_token))
+                cur.execute("INSERT INTO admin_sessions (username, session_token, pending_kick) VALUES (%s, %s, 0) ON CONFLICT (username) DO UPDATE SET session_token = EXCLUDED.session_token, pending_kick = 0", (username, neues_token))
                 conn.commit()
+                cur.close()
                 conn.close()
                 
                 session['admin_logged_in'] = True
@@ -177,7 +196,6 @@ def admin_bereich():
         else:
             return '<script>alert("Falsche Admin-Daten!"); window.location.href="/geheimer-admin-bereich";</script>'
 
-    # Sicherheits-Check: Wurde man ausgeloggt (weil man zugestimmt hat oder abgelaufen)?
     if session.get('admin_logged_in') and not check_admin_session():
         session.clear()
         return """
@@ -194,7 +212,6 @@ def admin_bereich():
         </html>
         """
 
-    # Wenn nicht eingeloggt, zeige die SCHÖNE Login-Maske
     if not session.get('admin_logged_in'):
         return """
         <!DOCTYPE html>
@@ -226,19 +243,21 @@ def admin_bereich():
         </html>
         """
 
-    # --- AB HIER: Erfolgreich im Dashboard ---
     refresh_zeit = request.args.get('refresh', '30')
     username = session['username']
 
     conn = get_db_connection()
-    session_row = conn.execute("SELECT pending_kick FROM admin_sessions WHERE username = ?", (username,)).fetchone()
-    user_list = conn.execute("SELECT * FROM benutzer").fetchall()
+    cur = conn.cursor(cursor_factory=DictCursor)
+    cur.execute("SELECT pending_kick FROM admin_sessions WHERE username = %s", (username,))
+    session_row = cur.fetchone()
+    
+    cur.execute("SELECT * FROM benutzer ORDER BY id ASC")
+    user_list = cur.fetchall()
+    cur.close()
     conn.close()
 
-    # Gibt es eine offene Übernahme-Anfrage von außen?
     anzeige_kick_popup = ""
     if session_row and session_row['pending_kick'] == 1:
-        # Falls eine Anfrage vorliegt, erzwingen wir ein schnelles Neuladen nach 5 Sekunden, um auf Reaktionen zu prüfen
         refresh_zeit = "5"
         anzeige_kick_popup = f"""
         <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 9999;">
@@ -280,8 +299,8 @@ def admin_bereich():
             .btn-logout {{ background: #636e72; color: white; }}
             .btn-logout:hover {{ background: #2d3436; }}
             .inline-form {{ display: flex; gap: 8px; margin: 0; width: 100%; }}
-            .inline-input {{ padding: 8px 12px; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 14px; width: 160px; background: #fbfbfb; transition: border 0.2s; }}
-            .inline-input:focus {{ border-color: #0984e3; background: #fff; outline: none; }}
+            .inline-form input {{ padding: 8px 12px; border: 1px solid #dfe6e9; border-radius: 6px; font-size: 14px; width: 160px; background: #fbfbfb; transition: border 0.2s; }}
+            .inline-form input:focus {{ border-color: #0984e3; background: #fff; outline: none; }}
         </style>
         <script>
             function aendereRefresh() {{
@@ -300,7 +319,7 @@ def admin_bereich():
             <div class="controls">
                 <div class="control-group">
                     <label>🔄 Intervall:</label>
-                    <input type="number" id="refresh-select" class="inline-input" style="width: 70px; padding: 6px;" value="{refresh_zeit}" min="5">
+                    <input type="number" id="refresh-select" style="width: 70px; padding: 6px; border: 1px solid #dfe6e9; border-radius: 6px;" value="{refresh_zeit}" min="5">
                     <span style="font-size: 14px; color: #636e72; margin-right: 5px;">Sek.</span>
                     <button class="btn btn-save" style="padding: 6px 12px;" onclick="aendereRefresh()">Übernehmen</button>
                 </div>
@@ -324,8 +343,8 @@ def admin_bereich():
             <td style="font-weight: 600; color: #b2bec3;">#{user['id']}</td>
             <td>
                 <form class="inline-form" method="POST" action="/admin/edit/{user['id']}">
-                    <input type="text" name="name" class="inline-input" value="{user['name']}" required>
-                    <input type="text" name="passwort" class="inline-input" value="{user['passwort']}" required>
+                    <input type="text" name="name" value="{user['name']}" required>
+                    <input type="text" name="passwort" value="{user['passwort']}" required>
                     <button type="submit" class="btn btn-save">💾 Speichern</button>
                 </form>
             </td>
