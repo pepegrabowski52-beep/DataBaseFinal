@@ -6,8 +6,8 @@ from flask import Flask, render_template, request, session, redirect
 app = Flask(__name__)
 app.secret_key = "ultratiefes-geheimnis-gruppe-4-2026"
 
-# Die Datenbank-Datei liegt direkt im Projektordner (bleibt bei Neustarts erhalten)
-DB_PATH = 'datenbank.db'
+# Absoluter Pfad für die Datenbank-Datei
+DB_PATH = os.path.join(os.getcwd(), 'datenbank.db')
 
 ERLAUBTE_ADMINS = {
     "SniperJohnny": "Gl22ur11",
@@ -17,7 +17,8 @@ ERLAUBTE_ADMINS = {
 }
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
+    # check_same_thread=False verhindert den "Internal Server Error"
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.execute('PRAGMA journal_mode=WAL;')
     conn.row_factory = sqlite3.Row
     return conn
@@ -43,11 +44,7 @@ def anmelden():
     conn.execute("INSERT INTO benutzer (name, passwort) VALUES (?, ?)", (name, pw))
     conn.commit()
     conn.close()
-    return redirect('/erfolg')
-
-@app.route('/erfolg')
-def erfolg():
-    return '<body style="font-family:sans-serif; text-align:center; padding-top:50px;"><h2>✔ Registrierung erfolgreich</h2><a href="/">Zurück</a></body>'
+    return '<html><body style="font-family:sans-serif; text-align:center; padding-top:50px;"><h2>✔ Erfolgreich registriert!</h2><a href="/">Zurück</a></body></html>'
 
 @app.route('/geheimer-admin-bereich', methods=['GET', 'POST'])
 def admin_bereich():
@@ -66,7 +63,6 @@ def admin_bereich():
             return redirect('/geheimer-admin-bereich')
         return '<script>alert("Falsche Daten!"); window.location.href="/geheimer-admin-bereich";</script>'
     
-    # Login Maske (Modernes Design)
     if not session.get('admin'):
         return '''<body style="background:#0984e3; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; font-family:sans-serif;">
         <form method="POST" style="background:white; padding:40px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
@@ -75,17 +71,15 @@ def admin_bereich():
         <input type="password" name="password" placeholder="Passwort" style="width:100%; padding:10px; margin:10px 0;" required><br>
         <button type="submit" style="width:100%; padding:10px; background:#0984e3; color:white; border:none; cursor:pointer;">Login</button></form></body>'''
 
-    # Dashboard-Ansicht
     conn = get_db_connection()
     user_list = conn.execute("SELECT * FROM benutzer").fetchall()
     session_data = conn.execute("SELECT pending_kick FROM admin_sessions WHERE username = ?", (session['user'],)).fetchone()
     conn.close()
 
-    # Kick-Popup (falls angefragt)
     popup = ""
     if session_data and session_data['pending_kick'] == 1:
         popup = '<div style="position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); display:flex; justify-content:center; align-items:center;">' \
-                '<div style="background:white; padding:20px;"><h3>Übernahme-Anfrage!</h3>' \
+                '<div style="background:white; padding:20px; border-radius:8px;"><h3>Übernahme-Anfrage!</h3>' \
                 '<form method="POST" action="/kick-decision"><button name="decision" value="yes">Zustimmen</button>' \
                 '<button name="decision" value="no">Ablehnen</button></form></div></div>'
 
@@ -97,13 +91,12 @@ def admin_bereich():
 
 @app.route('/kick-decision', methods=['POST'])
 def kick_decision():
+    conn = get_db_connection()
     if request.form.get('decision') == 'yes':
-        conn = get_db_connection()
         conn.execute("DELETE FROM admin_sessions WHERE username = ?", (session.get('user'),))
         conn.commit(); conn.close()
         session.clear()
     else:
-        conn = get_db_connection()
         conn.execute("UPDATE admin_sessions SET pending_kick = 0 WHERE username = ?", (session.get('user'),))
         conn.commit(); conn.close()
     return redirect('/geheimer-admin-bereich')
